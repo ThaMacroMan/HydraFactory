@@ -89,7 +89,7 @@ export default function HydraNodes({
   onStateFileInitializingChange,
   onHeadStatusUpdate,
 }: HydraNodesProps) {
-  const [expanded, setExpanded] = useState(true);
+  const [expanded, setExpanded] = useState(false);
   const [showCommands, setShowCommands] = useState(false);
   const [expandedCommands, setExpandedCommands] = useState<
     Record<string, boolean>

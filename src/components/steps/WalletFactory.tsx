@@ -47,7 +47,7 @@ export default function WalletFactory({
   onRefreshBalances,
   onSplitSingleUtxos,
 }: WalletFactoryProps) {
-  const [expanded, setExpanded] = useState(true);
+  const [expanded, setExpanded] = useState(false);
   const [fundDropdownOpen, setFundDropdownOpen] = useState(false);
   const [showFundTooltip, setShowFundTooltip] = useState(false);
   const [showSendModal, setShowSendModal] = useState(false);
