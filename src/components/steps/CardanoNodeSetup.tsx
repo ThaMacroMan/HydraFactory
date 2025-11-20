@@ -249,8 +249,15 @@ export default function CardanoNodeSetup({
         >
           <button
             onClick={handleStart}
-            disabled={running || starting || loading}
+            disabled={
+              running || starting || loading || !checklist?.allInstalled
+            }
             className="px-3 py-2 text-sm bg-emerald-600 hover:bg-emerald-500 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed text-white font-medium"
+            title={
+              !checklist?.allInstalled
+                ? "Please install all required software first"
+                : undefined
+            }
           >
             {running
               ? "Started"
