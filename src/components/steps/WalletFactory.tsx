@@ -74,7 +74,7 @@ export default function WalletFactory({
     try {
       await navigator.clipboard.writeText(address);
       window.open(faucetUrl, "_blank");
-    } catch (error) {
+    } catch {
       alert("Failed to copy address. Please copy manually: " + address);
     }
   };
@@ -144,22 +144,20 @@ export default function WalletFactory({
 
         {expanded && (
           <div className="px-6 py-6 space-y-4 border-t border-gray-800">
-            <div className="flex justify-between items-center flex-wrap gap-3">
-              <div>
-                <p className="text-gray-400 text-sm">
-                  Generates CLI keypairs, addresses, and corresponding Hydra
-                  wallet IDs.
-                </p>
-              </div>
-              <div className="flex gap-2">
-                <div className="relative fund-dropdown-container">
+            <div className="space-y-4">
+              <p className="text-gray-400 text-sm">
+                Generates CLI keypairs, addresses, and corresponding Hydra
+                wallet IDs.
+              </p>
+              <div className="flex items-center justify-between w-full gap-2 flex-wrap">
+                <div className="relative fund-dropdown-container flex-shrink-0 ml-8">
                   <button
                     onClick={() => setFundDropdownOpen(!fundDropdownOpen)}
                     onMouseEnter={() =>
                       wallets.length > 0 && setShowFundTooltip(true)
                     }
                     onMouseLeave={() => setShowFundTooltip(false)}
-                    className="px-4 py-2 bg-emerald-600 rounded-lg hover:bg-emerald-500 disabled:opacity-50 flex items-center gap-2 relative"
+                    className="px-4 py-2 bg-emerald-600 rounded-lg hover:bg-emerald-500 disabled:opacity-50 flex items-center gap-2 relative whitespace-nowrap"
                     disabled={wallets.length === 0}
                     title={
                       wallets.length === 0 ? "No wallets available to fund" : ""
@@ -221,7 +219,7 @@ export default function WalletFactory({
                 </div>
                 <button
                   onClick={() => setShowSendModal(true)}
-                  className="px-4 py-2 bg-emerald-600 rounded-lg hover:bg-emerald-500 disabled:opacity-50"
+                  className="px-4 py-2 bg-emerald-600 rounded-lg hover:bg-emerald-500 disabled:opacity-50 flex-shrink-0 whitespace-nowrap"
                   disabled={wallets.length < 2}
                   title={
                     wallets.length < 2
@@ -234,7 +232,7 @@ export default function WalletFactory({
                 {onRefreshBalances && (
                   <button
                     onClick={handleRefresh}
-                    className="px-4 py-2 bg-gray-700 rounded-lg hover:bg-gray-600 disabled:opacity-50 flex items-center gap-2"
+                    className="px-4 py-2 bg-gray-700 rounded-lg hover:bg-gray-600 disabled:opacity-50 flex items-center gap-2 flex-shrink-0 whitespace-nowrap"
                     disabled={wallets.length === 0 || isRefreshingState}
                     title="Refresh wallet balances and UTXOs"
                   >
@@ -259,7 +257,7 @@ export default function WalletFactory({
                 {onSplitSingleUtxos && (
                   <button
                     onClick={handleSplitUtxos}
-                    className="px-4 py-2 bg-purple-600 rounded-lg hover:bg-purple-500 disabled:opacity-50 flex items-center gap-2"
+                    className="px-4 py-2 bg-purple-600 rounded-lg hover:bg-purple-500 disabled:opacity-50 flex items-center gap-2 flex-shrink-0 whitespace-nowrap"
                     disabled={wallets.length === 0 || isSplitting}
                     title="Split wallets with single UTXO into 3 UTXOs (needed for Hydra commits)"
                   >
@@ -281,7 +279,7 @@ export default function WalletFactory({
                 )}
                 <button
                   onClick={onCreateWallet}
-                  className="px-4 py-2 bg-sky-600 rounded-lg hover:bg-sky-500 disabled:opacity-50"
+                  className="px-4 py-2 bg-sky-600 rounded-lg hover:bg-sky-500 disabled:opacity-50 flex-shrink-0 whitespace-nowrap mr-8"
                   disabled={creatingWallet}
                 >
                   {creatingWallet ? "Generating..." : "Generate wallet pair"}

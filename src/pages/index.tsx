@@ -1,4 +1,5 @@
 import Head from "next/head";
+import Image from "next/image";
 import { useEffect, useState, useCallback, useRef, startTransition } from "react";
 import { TransactionLogEntry } from "@/components/TransactionLog";
 import { HeadStatus, Party, HydraAPIClient } from "@/lib/hydra-client";
@@ -1140,9 +1141,18 @@ export default function Home() {
       </Head>
       <main className="max-w-6xl mx-auto px-6 py-12 space-y-10">
         <header className="space-y-3 text-center">
-          <p className="text-4xl uppercase tracking-wider text-sky-400 font-bold">
-            Hydra Factory
-          </p>
+          <div className="flex items-center justify-center gap-4">
+            <Image
+              src="/favicon.ico"
+              alt="Hydra Factory"
+              width={64}
+              height={64}
+              className="w-16 h-16"
+            />
+            <p className="text-6xl uppercase tracking-wider text-sky-400 font-bold">
+              Hydra Factory
+            </p>
+          </div>
           <h1 className="text-xl font-semibold">
             Spin up your node, wallets, and a Hydra heads in one place.
           </h1>

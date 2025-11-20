@@ -26,10 +26,10 @@ export default function ChecklistItem({
   const [expanded, setExpanded] = useState(false);
 
   return (
-    <div className="bg-gray-800/50 rounded-lg overflow-hidden">
+    <div className="bg-gray-800/50 rounded-lg overflow-hidden border border-gray-700/30 hover:border-gray-600/50 transition-colors">
       <button
         onClick={() => setExpanded(!expanded)}
-        className="w-full flex items-center gap-3 p-3 hover:bg-gray-800/70 transition"
+        className="w-full flex items-center gap-3 p-3 hover:bg-gray-800/70 transition cursor-pointer group"
       >
         <div className="mt-0.5">
           {item.installed ? (
@@ -59,23 +59,30 @@ export default function ChecklistItem({
           )}
         </div>
         <div className="flex-1 text-left">
-          <p className="font-medium">{item.name}</p>
+          <p className="font-medium group-hover:text-gray-100 transition-colors">
+            {item.name}
+          </p>
         </div>
-        <svg
-          className={`w-4 h-4 text-gray-400 transition-transform ${
-            expanded ? "rotate-90" : ""
-          }`}
-          fill="none"
-          stroke="currentColor"
-          viewBox="0 0 24 24"
-        >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2}
-            d="M9 5l7 7-7 7"
-          />
-        </svg>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-gray-500 group-hover:text-gray-400 transition-colors">
+            {expanded ? "Less" : "More"}
+          </span>
+          <svg
+            className={`w-4 h-4 text-gray-400 group-hover:text-gray-300 transition-all ${
+              expanded ? "rotate-90" : ""
+            }`}
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M9 5l7 7-7 7"
+            />
+          </svg>
+        </div>
       </button>
       {expanded && (
         <div className="px-3 pb-3 space-y-2 border-t border-gray-700/50">
