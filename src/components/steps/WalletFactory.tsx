@@ -53,7 +53,7 @@ export default function WalletFactory({
   const [showSendModal, setShowSendModal] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isSplitting, setIsSplitting] = useState(false);
-  
+
   // Combine initial loading with manual refresh state
   const isRefreshingState = isInitialLoading || isRefreshing;
 
@@ -196,7 +196,7 @@ export default function WalletFactory({
                     )}
                   </button>
                   {fundDropdownOpen && wallets.length > 0 && (
-                    <div className="absolute right-0 mt-2 w-48 bg-gray-800 border border-gray-700 rounded-lg shadow-lg z-10 max-h-64 overflow-y-auto">
+                    <div className="absolute left-0 mt-2 w-56 bg-gray-800 border border-gray-700 rounded-lg shadow-lg z-50 max-h-64 overflow-y-auto">
                       {wallets.map((wallet) => (
                         <button
                           key={wallet.id}
@@ -239,7 +239,9 @@ export default function WalletFactory({
                     title="Refresh wallet balances and UTXOs"
                   >
                     <svg
-                      className={`w-4 h-4 ${isRefreshingState ? "animate-spin" : ""}`}
+                      className={`w-4 h-4 ${
+                        isRefreshingState ? "animate-spin" : ""
+                      }`}
                       fill="none"
                       stroke="currentColor"
                       viewBox="0 0 24 24"

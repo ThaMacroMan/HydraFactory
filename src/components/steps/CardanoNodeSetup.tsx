@@ -210,6 +210,10 @@ export default function CardanoNodeSetup({
                 </div>
               )}
             </div>
+            <CopyCommandButton
+              command="cd .cardano && tail -f logs/cardano-node.log"
+              description="View node logs"
+            />
           </div>
 
           <div>
