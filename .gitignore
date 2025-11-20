@@ -49,3 +49,10 @@ package-lock.json
 state
 /.hydra/persistence-*/
 /.hydra/logs/
+/.hydra/hydra-node
+/.hydra/hydra-tui
+/hydra-node
+hydra-node
+hydra-tui
+/.hydra/lib/liblmdb.so
+/.cardano/bin/liblmdb.so

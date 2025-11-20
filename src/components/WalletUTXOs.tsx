@@ -678,7 +678,7 @@ const WalletUTXOs = forwardRef<WalletUTXOsRef, WalletUTXOsProps>(
       </div>
     </div>
   );
-  }
+}
 );
 
 // Memoize to prevent unnecessary re-renders
