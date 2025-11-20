@@ -3,11 +3,13 @@ import { useState, useEffect, useCallback } from "react";
 interface DownloadButtonProps {
   filePath: string;
   className?: string;
+  onDownloaded?: () => void;
 }
 
 export default function DownloadButton({
   filePath,
   className = "",
+  onDownloaded,
 }: DownloadButtonProps) {
   const [loading, setLoading] = useState(false);
   const [downloadInfo, setDownloadInfo] = useState<{
@@ -35,6 +37,13 @@ export default function DownloadButton({
   const handleDownload = () => {
     if (downloadInfo) {
       window.open(downloadInfo.url, "_blank", "noopener,noreferrer");
+      // Refresh checklist after a delay to detect the downloaded archive
+      // Give user time to download and drop the file (5 seconds)
+      if (onDownloaded) {
+        setTimeout(() => {
+          onDownloaded();
+        }, 5000);
+      }
     } else {
       fetchDownloadInfo();
     }

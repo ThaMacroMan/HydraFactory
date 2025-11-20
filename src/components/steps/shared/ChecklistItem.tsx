@@ -109,7 +109,7 @@ export default function ChecklistItem({
                   onExtracted={onRefresh}
                 />
               )}
-              <DownloadButton filePath={item.path} />
+              <DownloadButton filePath={item.path} onDownloaded={onRefresh} />
             </div>
           )}
         </div>
