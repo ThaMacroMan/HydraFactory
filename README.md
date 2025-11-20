@@ -83,4 +83,6 @@ All instructions, links, and commands are built into the interface—no external
 
 ## License
 
-[Add your license here]
+MIT License - see [LICENSE](LICENSE) file for details.
+
+This project is fully open source. You're free to use, modify, and distribute it as you wish.
