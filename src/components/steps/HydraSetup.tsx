@@ -124,15 +124,19 @@ function HydraNodeItem({
                   />
                 </div>
               </div>
-              <div className="flex gap-2 flex-wrap">
+              <div className="flex gap-4 justify-center">
                 {item.needsExtraction && item.archivePath && (
                   <ExtractButton
                     archivePath={item.archivePath}
                     targetPath={item.path}
                     onExtracted={onRefresh}
+                    className="px-6 py-3 text-sm font-medium"
                   />
                 )}
-                <DownloadButton filePath={item.path} />
+                <DownloadButton
+                  filePath={item.path}
+                  className="px-6 py-3 text-sm font-medium"
+                />
               </div>
             </>
           )}

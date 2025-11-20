@@ -4,12 +4,14 @@ interface ExtractButtonProps {
   archivePath: string;
   targetPath: string;
   onExtracted: () => void;
+  className?: string;
 }
 
 export default function ExtractButton({
   archivePath,
   targetPath,
   onExtracted,
+  className = "",
 }: ExtractButtonProps) {
   const [extracting, setExtracting] = useState(false);
 
@@ -38,7 +40,7 @@ export default function ExtractButton({
     <button
       onClick={handleExtract}
       disabled={extracting}
-      className="px-3 py-1.5 text-xs bg-emerald-600 hover:bg-emerald-500 rounded-lg disabled:opacity-50 whitespace-nowrap"
+      className={`px-3 py-1.5 text-xs bg-emerald-600 hover:bg-emerald-500 rounded-lg disabled:opacity-50 whitespace-nowrap ${className}`}
       title="Extract archive and copy binaries to bin/"
     >
       {extracting ? "Extracting..." : "Extract"}

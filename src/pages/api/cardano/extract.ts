@@ -119,6 +119,21 @@ export default async function handler(
         for (const file of rootBinaries) {
           const sourcePath = path.join(extractionRoot, file);
           const targetPath = path.join(targetBinDir, file);
+          
+          // Skip if source and target are the same (already in correct location)
+          if (path.resolve(sourcePath) === path.resolve(targetPath)) {
+            // Just ensure it's executable and remove quarantine if needed
+            try {
+              await fs.chmod(targetPath, 0o755);
+              await runCommand("xattr", ["-d", "com.apple.quarantine", targetPath], {
+                cwd: extractionRoot,
+              });
+            } catch {
+              // Ignore errors
+            }
+            continue;
+          }
+          
           const stat = await fs.stat(sourcePath);
           if (stat.isFile()) {
             await fs.copyFile(sourcePath, targetPath);
@@ -141,6 +156,19 @@ export default async function handler(
           for (const file of rootDylibs) {
             const sourcePath = path.join(extractionRoot, file);
             const targetPath = path.join(libTargetDir, file);
+            
+            // Skip if source and target are the same
+            if (path.resolve(sourcePath) === path.resolve(targetPath)) {
+              try {
+                await runCommand("xattr", ["-d", "com.apple.quarantine", targetPath], {
+                  cwd: extractionRoot,
+                });
+              } catch {
+                // Ignore errors
+              }
+              continue;
+            }
+            
             const stat = await fs.stat(sourcePath);
             if (stat.isFile()) {
               await fs.copyFile(sourcePath, targetPath);
@@ -167,6 +195,21 @@ export default async function handler(
       for (const file of files) {
         const sourcePath = path.join(sourceBinDir, file);
         const targetPath = path.join(targetBinDir, file);
+        
+        // Skip if source and target are the same (already in correct location)
+        if (path.resolve(sourcePath) === path.resolve(targetPath)) {
+          // Just ensure it's executable and remove quarantine if needed
+          try {
+            await fs.chmod(targetPath, 0o755);
+            await runCommand("xattr", ["-d", "com.apple.quarantine", targetPath], {
+              cwd: CARDANO_ROOT,
+            });
+          } catch {
+            // Ignore errors
+          }
+          continue;
+        }
+        
         const stat = await fs.stat(sourcePath);
         if (stat.isFile()) {
           await fs.copyFile(sourcePath, targetPath);
@@ -194,6 +237,19 @@ export default async function handler(
         if (file.endsWith(".dylib") || file.endsWith(".so")) {
           const sourcePath = path.join(possibleLibDir, file);
           const targetPath = path.join(libTargetDir, file);
+          
+          // Skip if source and target are the same
+          if (path.resolve(sourcePath) === path.resolve(targetPath)) {
+            try {
+              await runCommand("xattr", ["-d", "com.apple.quarantine", targetPath], {
+                cwd: CARDANO_ROOT,
+              });
+            } catch {
+              // Ignore errors
+            }
+            continue;
+          }
+          
           const stat = await fs.stat(sourcePath);
           if (stat.isFile()) {
             await fs.copyFile(sourcePath, targetPath);
@@ -221,6 +277,19 @@ export default async function handler(
         for (const file of dylibFiles) {
           const sourcePath = path.join(sourceBinDir, file);
           const targetPath = path.join(libTargetDir, file);
+          
+          // Skip if source and target are the same
+          if (path.resolve(sourcePath) === path.resolve(targetPath)) {
+            try {
+              await runCommand("xattr", ["-d", "com.apple.quarantine", targetPath], {
+                cwd: CARDANO_ROOT,
+              });
+            } catch {
+              // Ignore errors
+            }
+            continue;
+          }
+          
           const stat = await fs.stat(sourcePath);
           if (stat.isFile()) {
             await fs.copyFile(sourcePath, targetPath);

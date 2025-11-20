@@ -135,15 +135,19 @@ function CardanoNodeCliItem({
                   />
                 </div>
               </div>
-              <div className="flex gap-2 flex-wrap">
+              <div className="flex gap-4 justify-center">
                 {item.needsExtraction && item.archivePath && (
                   <ExtractButton
                     archivePath={item.archivePath}
                     targetPath={item.path}
                     onExtracted={onRefresh}
+                    className="px-6 py-3 text-sm font-medium"
                   />
                 )}
-                <DownloadButton filePath={item.path} />
+                <DownloadButton
+                  filePath={item.path}
+                  className="px-6 py-3 text-sm font-medium"
+                />
               </div>
             </>
           )}
@@ -351,8 +355,8 @@ export default function CardanoNodeSetup({
                   </h4>
                   <div className="space-y-2">
                     {(() => {
-                      const cardanoBinaries = checklist.items.filter(
-                        (item) => item.path.startsWith("bin/")
+                      const cardanoBinaries = checklist.items.filter((item) =>
+                        item.path.startsWith("bin/")
                       );
                       const cardanoNode = cardanoBinaries.find(
                         (item) => item.path === "bin/cardano-node"
@@ -380,7 +384,8 @@ export default function CardanoNodeSetup({
                                 cardanoNode.archiveFound ||
                                 cardanoCli.archiveFound,
                               archivePath:
-                                cardanoNode.archivePath || cardanoCli.archivePath,
+                                cardanoNode.archivePath ||
+                                cardanoCli.archivePath,
                               needsExtraction:
                                 cardanoNode.needsExtraction ||
                                 cardanoCli.needsExtraction,
@@ -461,21 +466,21 @@ export default function CardanoNodeSetup({
               <div>
                 <p className="font-medium mb-2">2. Start Cardano node</p>
                 <CopyCommandButton
-                  command="cd .cardano && ../scripts/start-cardano-node.sh"
+                  command="../scripts/start-cardano-node.sh"
                   description="Starts the Cardano node with automatic Mithril fast sync"
                 />
               </div>
               <div>
                 <p className="font-medium mb-2">3. Verify sync status</p>
                 <CopyCommandButton
-                  command="cd .cardano && ./bin/cardano-cli query tip --testnet-magic 1"
+                  command="./bin/cardano-cli query tip --testnet-magic 1"
                   description="Check if the node is synced (look for syncProgress: 100.00)"
                 />
               </div>
               <div>
                 <p className="font-medium mb-2">4. View node logs (optional)</p>
                 <CopyCommandButton
-                  command="cd .cardano && tail -f logs/cardano-node.log"
+                  command="tail -f logs/cardano-node.log"
                   description="View real-time node logs in terminal (Ctrl+C to exit)"
                 />
               </div>

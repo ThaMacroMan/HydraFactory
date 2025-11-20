@@ -59,3 +59,7 @@ state
 hydra-node
 hydra-tui
 /.hydra/lib/liblmdb.so
+
+# Explicitly allow download guide images (never ignore these)
+!public/cardanodownload.png
+!public/hydranodedownload.png
