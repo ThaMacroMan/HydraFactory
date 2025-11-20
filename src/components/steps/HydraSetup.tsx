@@ -136,7 +136,6 @@ function HydraNodeItem({
                 <DownloadButton
                   filePath={item.path}
                   className="px-6 py-3 text-sm font-medium"
-                  onDownloaded={onRefresh}
                 />
               </div>
             </>

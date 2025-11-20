@@ -67,21 +67,21 @@ export default function ChecklistItem({
           <span className="text-xs text-gray-500 group-hover:text-gray-400 transition-colors">
             {expanded ? "Less" : "More"}
           </span>
-          <svg
+        <svg
             className={`w-4 h-4 text-gray-400 group-hover:text-gray-300 transition-all ${
-              expanded ? "rotate-90" : ""
-            }`}
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M9 5l7 7-7 7"
-            />
-          </svg>
+            expanded ? "rotate-90" : ""
+          }`}
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={2}
+            d="M9 5l7 7-7 7"
+          />
+        </svg>
         </div>
       </button>
       {expanded && (
@@ -109,7 +109,7 @@ export default function ChecklistItem({
                   onExtracted={onRefresh}
                 />
               )}
-              <DownloadButton filePath={item.path} onDownloaded={onRefresh} />
+              <DownloadButton filePath={item.path} />
             </div>
           )}
         </div>

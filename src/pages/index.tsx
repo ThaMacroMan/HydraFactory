@@ -1150,8 +1150,8 @@ export default function Home() {
               className="w-16 h-16"
             />
             <p className="text-6xl uppercase tracking-wider text-sky-400 font-bold">
-              Hydra Factory
-            </p>
+            Hydra Factory
+          </p>
           </div>
           <h1 className="text-xl font-semibold">
             Spin up your node, wallets, and a Hydra heads in one place.
