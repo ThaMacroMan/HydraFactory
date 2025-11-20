@@ -69,6 +69,25 @@ All instructions, links, and commands are built into the interface—no external
 
 **Committing UTXOs** is still a work in progress. If you encounter errors when committing a specific UTXO, try committing a different UTXO instead. This usually resolves the issue.
 
+### macOS Security Warnings
+
+If you see security warnings when trying to run Cardano CLI tools on macOS, you may encounter these dialogs:
+
+![Cannot Verify](public/cannotverify.png)
+![Click Open Privacy](public/clickopenprivacy.png)
+![Allow Anyway](public/allowanyway.png)
+
+**To fix this, you must allow anyway under Privacy and Settings in Mac:**
+
+1. Go to **System Settings** > **Privacy & Security**
+2. Scroll down to the **Security** section
+3. You'll see a message that the app was blocked
+4. Click **"Allow Anyway"** next to the blocked app
+5. Enter your password when prompted
+6. Try running the command again
+
+This is required because Cardano CLI binaries are not signed by Apple, but they are safe to use.
+
 ---
 
 ## Troubleshooting
