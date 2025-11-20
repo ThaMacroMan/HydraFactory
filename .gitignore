@@ -42,7 +42,11 @@ next-env.d.ts
 package-lock.json
 
 # Cardano node data (downloaded binaries, configs, etc.)
-/.cardano/
+# Ignore everything in .cardano (including JSON config files)
+# But keep the folder structure with .gitkeep
+/.cardano/**
+!/.cardano/
+!/.cardano/.gitkeep
 /.tmp/
 
 # Hydra node runtime files
@@ -55,4 +59,3 @@ state
 hydra-node
 hydra-tui
 /.hydra/lib/liblmdb.so
-/.cardano/bin/liblmdb.so
