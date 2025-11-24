@@ -11,6 +11,19 @@ interface CardanoStatus {
   synced?: boolean;
   syncProgress?: string;
   error?: string;
+  version?: string;
+}
+
+interface ReleaseInfo {
+  latestVersion: string;
+  latestTag: string;
+  publishedAt: string;
+  releaseUrl: string;
+  assets: Array<{
+    name: string;
+    downloadUrl: string;
+    size: number;
+  }>;
 }
 
 interface SoftwareItem {
@@ -175,8 +188,16 @@ export default function CardanoNodeSetup({
   const [starting, setStarting] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [started, setStarted] = useState(false);
+  const [checkingReleases, setCheckingReleases] = useState(false);
+  const [releaseInfo, setReleaseInfo] = useState<ReleaseInfo | null>(null);
+  const [releaseError, setReleaseError] = useState<string | null>(null);
+  const [downloading, setDownloading] = useState(false);
+  const [installing, setInstalling] = useState(false);
+  const [installError, setInstallError] = useState<string | null>(null);
+  const [installSuccess, setInstallSuccess] = useState(false);
   const running = status?.running ?? false;
   const synced = status?.synced ?? false;
+  const currentVersion = status?.version;
 
   const handleStart = async () => {
     try {
@@ -217,6 +238,105 @@ export default function CardanoNodeSetup({
       alert(`Failed to stop Cardano node: ${(error as Error).message}`);
     } finally {
       setStopping(false);
+    }
+  };
+
+  const handleCheckReleases = async () => {
+    try {
+      setCheckingReleases(true);
+      setReleaseError(null);
+      const res = await fetch("/api/cardano/releases");
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "Failed to fetch releases");
+      }
+      setReleaseInfo(data);
+    } catch (error) {
+      setReleaseError((error as Error).message);
+    } finally {
+      setCheckingReleases(false);
+    }
+  };
+
+  const isUpdateAvailable = (): boolean => {
+    if (!currentVersion || !releaseInfo) return false;
+    const current = currentVersion.split(".").map(Number);
+    const latest = releaseInfo.latestVersion.split(".").map(Number);
+    for (let i = 0; i < Math.max(current.length, latest.length); i++) {
+      const curr = current[i] || 0;
+      const lat = latest[i] || 0;
+      if (lat > curr) return true;
+      if (lat < curr) return false;
+    }
+    return false;
+  };
+
+  const handleDownloadAndInstall = async () => {
+    if (running) {
+      if (
+        !confirm(
+          "The Cardano node is currently running. It must be stopped before upgrading. Stop the node now?"
+        )
+      ) {
+        return;
+      }
+      // Stop the node first
+      try {
+        await handleStop();
+        // Wait a bit for the node to stop
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+      } catch (error) {
+        alert(
+          `Failed to stop node: ${(error as Error).message}. Please stop it manually before upgrading.`
+        );
+        return;
+      }
+    }
+
+    try {
+      setDownloading(true);
+      setInstalling(false);
+      setInstallError(null);
+      setInstallSuccess(false);
+
+      // Step 1: Download the latest release
+      const downloadRes = await fetch("/api/cardano/download-latest", {
+        method: "POST",
+      });
+      const downloadData = await downloadRes.json();
+      if (!downloadRes.ok) {
+        throw new Error(downloadData.error || "Failed to download release");
+      }
+
+      // Step 2: Extract the archive
+      setDownloading(false);
+      setInstalling(true);
+
+      const extractRes = await fetch("/api/cardano/extract", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          archivePath: downloadData.archivePath,
+          targetPath: "bin/",
+        }),
+      });
+      const extractData = await extractRes.json();
+      if (!extractRes.ok) {
+        throw new Error(extractData.error || "Failed to extract archive");
+      }
+
+      setInstalling(false);
+      setInstallSuccess(true);
+
+      // Refresh status and checklist to show new version
+      setTimeout(() => {
+        onRefresh();
+        setInstallSuccess(false);
+      }, 2000);
+    } catch (error) {
+      setDownloading(false);
+      setInstalling(false);
+      setInstallError((error as Error).message);
     }
   };
 
@@ -345,11 +465,92 @@ export default function CardanoNodeSetup({
                   </div>
                 </div>
               )}
+              {currentVersion && (
+                <div className="mt-2 flex items-center gap-2">
+                  <span className="text-xs text-gray-500">Version:</span>
+                  <span className="text-xs font-mono text-gray-300">
+                    {currentVersion}
+                  </span>
+                  {releaseInfo && isUpdateAvailable() && (
+                    <span className="text-xs text-amber-400 font-medium">
+                      (Update available: {releaseInfo.latestVersion})
+                    </span>
+                  )}
+                </div>
+              )}
             </div>
-            <CopyCommandButton
-              command="cd .cardano && tail -f logs/cardano-node.log"
-              description="View node logs"
-            />
+            <div className="flex flex-col gap-2 items-end">
+              <div className="flex gap-2">
+                <button
+                  onClick={handleCheckReleases}
+                  disabled={checkingReleases}
+                  className="px-3 py-2 text-sm border border-gray-700 rounded-lg hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {checkingReleases ? "Checking..." : "Check Updates"}
+                </button>
+                <CopyCommandButton
+                  command="cd .cardano && tail -f logs/cardano-node.log"
+                  description="View node logs"
+                />
+              </div>
+              {releaseInfo && (
+                <div className="flex flex-col items-end gap-2 min-w-[280px]">
+                  {isUpdateAvailable() ? (
+                    <>
+                      <button
+                        onClick={handleDownloadAndInstall}
+                        disabled={
+                          downloading ||
+                          installing ||
+                          running ||
+                          (!isUpdateAvailable() && currentVersion)
+                        }
+                        className="px-4 py-2 text-sm bg-emerald-600 hover:bg-emerald-500 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed text-white font-medium w-full"
+                        title={
+                          running
+                            ? "Stop the node before upgrading"
+                            : !isUpdateAvailable() && currentVersion
+                            ? "You are already on the latest version"
+                            : "Download and install the latest Cardano node release"
+                        }
+                      >
+                        {downloading
+                          ? "Downloading..."
+                          : installing
+                          ? "Installing..."
+                          : "Download & Install Latest"}
+                      </button>
+                      {installSuccess && (
+                        <div className="w-full p-2 bg-emerald-500/10 border border-emerald-500/20 rounded text-xs">
+                          <p className="text-emerald-400">
+                            ✓ Installed {releaseInfo.latestVersion}
+                          </p>
+                        </div>
+                      )}
+                      {installError && (
+                        <div className="w-full p-2 bg-red-500/10 border border-red-500/20 rounded text-xs">
+                          <p className="text-red-400">✗ {installError}</p>
+                        </div>
+                      )}
+                      <div className="w-full text-xs text-gray-400">
+                        <p className="mb-1">
+                          Latest: <span className="font-mono text-gray-300">{releaseInfo.latestVersion}</span>
+                        </p>
+                        <p className="text-gray-500">
+                          Published {new Date(releaseInfo.publishedAt).toLocaleDateString()}
+                        </p>
+                      </div>
+                    </>
+                  ) : currentVersion ? (
+                    <div className="w-full p-2 bg-emerald-500/10 border border-emerald-500/20 rounded text-xs">
+                      <p className="text-emerald-400">
+                        ✓ Latest version ({currentVersion})
+                      </p>
+                    </div>
+                  ) : null}
+                </div>
+              )}
+            </div>
           </div>
 
           <div>
@@ -505,6 +706,73 @@ export default function CardanoNodeSetup({
               </div>
             </div>
           </div>
+
+          {releaseInfo && isUpdateAvailable() && (
+            <div className="p-4 bg-gray-800/50 rounded-lg border border-gray-700/50 space-y-3">
+              <div>
+                <h4 className="font-semibold text-sm mb-2">Upgrade Instructions</h4>
+                <div className="bg-gray-900/50 rounded-lg p-3 space-y-2 text-xs">
+                  <div>
+                    <p className="font-medium mb-1">Automatic Installation</p>
+                    <p className="text-gray-400 mb-2">
+                      Click the "Download & Install Latest" button above to
+                      automatically download and install the latest release. The
+                      process will:
+                    </p>
+                    <ol className="list-decimal list-inside space-y-1 ml-2 text-gray-400">
+                      <li>Stop the Cardano node (if running)</li>
+                      <li>Download the latest release archive for your platform</li>
+                      <li>Extract and install the new binaries to{" "}
+                        <code className="text-gray-300">.cardano/bin/</code>
+                      </li>
+                      <li>Update the version information</li>
+                    </ol>
+                  </div>
+                  <div className="pt-2 border-t border-gray-700/50">
+                    <p className="font-medium mb-1">Manual Installation</p>
+                    <p className="text-gray-400 mb-2">
+                      Alternatively, you can manually download from the{" "}
+                      <a
+                        href={releaseInfo.releaseUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-blue-400 hover:text-blue-300 underline"
+                      >
+                        GitHub release page
+                      </a>
+                      . Download the archive for your platform and drop it into the{" "}
+                      <code className="text-gray-300">.cardano</code> folder, then
+                      use the Extract button in the checklist above.
+                    </p>
+                    <div className="text-gray-500 text-xs">
+                      <p className="mb-1">Available downloads:</p>
+                      <ul className="list-disc list-inside space-y-1 ml-2">
+                        {releaseInfo.assets
+                          .filter((asset) =>
+                            /\.(zip|tar\.gz)$/i.test(asset.name)
+                          )
+                          .slice(0, 5)
+                          .map((asset) => (
+                            <li key={asset.name} className="font-mono text-xs">
+                              {asset.name} (
+                              {(asset.size / 1024 / 1024).toFixed(1)} MB)
+                            </li>
+                          ))}
+                      </ul>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {releaseError && (
+            <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-lg">
+              <p className="text-sm text-red-400">
+                Failed to check releases: {releaseError}
+              </p>
+            </div>
+          )}
 
           {status?.error && (
             <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-lg">

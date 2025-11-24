@@ -11,6 +11,7 @@ interface CardanoStatus {
   synced?: boolean;
   syncProgress?: string;
   error?: string;
+  version?: string;
 }
 
 export default async function handler(
@@ -51,8 +52,30 @@ export default async function handler(
     // Node is running if process exists OR socket exists (socket might not exist during Mithril replay)
     const running = processRunning || socketExists;
 
+    // Get node version if binary exists
+    let version: string | undefined;
+    try {
+      const CARDANO_NODE = path.join(CARDANO_ROOT, "bin", "cardano-node");
+      if (await pathExists(CARDANO_NODE)) {
+        try {
+          const { stdout } = await runCommand(CARDANO_NODE, ["--version"], {
+            logCommand: "cardano-node --version",
+          });
+          // Extract version from output (format: "cardano-node 8.9.2 - linux - x86_64")
+          const versionMatch = stdout.match(/cardano-node\s+([\d.]+)/);
+          if (versionMatch) {
+            version = versionMatch[1];
+          }
+        } catch {
+          // Version check failed, but that's okay
+        }
+      }
+    } catch {
+      // Ignore version check errors
+    }
+
     if (!running) {
-      return res.status(200).json({ running: false });
+      return res.status(200).json({ running: false, version });
     }
 
     // Try to query tip to check sync status
@@ -63,6 +86,7 @@ export default async function handler(
           running: true,
           synced: false,
           error: "cardano-cli not found in .cardano/bin",
+          version,
         });
       }
       const { stdout } = await runCommand(
@@ -84,6 +108,7 @@ export default async function handler(
         running: true,
         synced,
         syncProgress,
+        version,
       });
     } catch (error) {
       // Node might be running but not ready yet (e.g., replaying blocks from Mithril)
@@ -129,6 +154,7 @@ export default async function handler(
         running: true,
         synced: false,
         syncProgress: replayProgress || "0.00",
+        version,
       });
     }
   } catch (error) {

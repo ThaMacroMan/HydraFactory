@@ -65,6 +65,21 @@ All instructions, links, and commands are built into the interface—no external
 - **Ports**: Hydra nodes use ports 4001, 4002, etc. (configurable)
 - **Environment**: Run `setup-env.sh` if CLI commands fail
 
+### Custom Hydra Scripts
+
+By default, HydraFactory uses the official Hydra scripts deployed on preprod. To use your own custom Hydra validator scripts:
+
+1. **Deploy your custom scripts** to Cardano (see [CUSTOM_HYDRA_SCRIPTS_GUIDE.md](./CUSTOM_HYDRA_SCRIPTS_GUIDE.md) for details)
+2. **Set the environment variable** before starting:
+   ```bash
+   export CUSTOM_SCRIPTS_TX_ID="your-tx-id-1,your-tx-id-2,your-tx-id-3"
+   npm run dev
+   ```
+
+Or edit `scripts/setup-env.sh` directly to change the `SCRIPTS_TX_ID`.
+
+**Note**: Custom scripts must be compatible with `hydra-node`. See the [Custom Hydra Scripts Guide](./CUSTOM_HYDRA_SCRIPTS_GUIDE.md) for full instructions.
+
 ## Current Issues
 
 **Committing UTXOs** is still a work in progress. If you encounter errors when committing a specific UTXO, try committing a different UTXO instead. This usually resolves the issue.

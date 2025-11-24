@@ -28,10 +28,14 @@ interface WalletFactoryProps {
   onCreateWallet: () => void;
   onSendAda: (
     fromWalletId: string,
-    toAddress: string,
-    amount: string
+    recipients: Array<{ address: string; amounts: string[] }>
   ) => Promise<void>;
   isInitialLoading?: boolean;
+  pendingTransaction?: {
+    fromWalletId: string;
+    toAddresses: string[];
+    amount: string;
+  } | null;
   onRefreshBalances?: () => void;
   onSplitSingleUtxos?: () => Promise<void>;
 }
@@ -44,6 +48,7 @@ export default function WalletFactory({
   onCreateWallet,
   onSendAda,
   isInitialLoading = false,
+  pendingTransaction,
   onRefreshBalances,
   onSplitSingleUtxos,
 }: WalletFactoryProps) {
@@ -220,9 +225,11 @@ export default function WalletFactory({
                 <button
                   onClick={() => setShowSendModal(true)}
                   className="px-4 py-2 bg-emerald-600 rounded-lg hover:bg-emerald-500 disabled:opacity-50 flex-shrink-0 whitespace-nowrap"
-                  disabled={wallets.length < 2}
+                  disabled={wallets.length < 2 || !!pendingTransaction}
                   title={
-                    wallets.length < 2
+                    pendingTransaction
+                      ? "Transaction in progress..."
+                      : wallets.length < 2
                       ? "Need at least 2 wallets to send ADA"
                       : ""
                   }
@@ -292,80 +299,117 @@ export default function WalletFactory({
               </p>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                {wallets.map((wallet) => (
-                  <div
-                    key={wallet.id}
-                    className="border border-gray-800 rounded-xl p-4"
-                  >
-                    <div className="flex items-center gap-2 flex-wrap text-md">
-                      <span className="font-semibold text-base capitalize text-gray-100">
-                        {wallet.label || wallet.id}
-                      </span>
-                      {wallet.balance !== undefined && (
-                        <>
-                          <span
-                            className={`text-sm font-medium ${
-                              wallet.balance.hasFunds
-                                ? "text-emerald-400"
-                                : "text-gray-400"
-                            }`}
-                          >
-                            {wallet.balance.ada} ADA
-                          </span>
-                          {wallet.balance.utxoCount !== undefined && (
-                            <span className="text-sm text-gray-100">
-                              ({wallet.balance.utxoCount} UTXO
-                              {wallet.balance.utxoCount !== 1 ? "s" : ""})
-                            </span>
-                          )}
-                        </>
-                      )}
-                      {wallet.cardanoAddress && (
-                        <span
-                          className="font-mono text-gray-400 text-xs truncate"
-                          title={wallet.cardanoAddress}
-                        >
-                          {wallet.cardanoAddress.slice(0, 12)}...
-                          {wallet.cardanoAddress.slice(-8)}
+                {wallets.map((wallet) => {
+                  const isSending =
+                    pendingTransaction?.fromWalletId === wallet.id;
+                  const isReceiving =
+                    pendingTransaction?.toAddresses?.includes(
+                      wallet.cardanoAddress
+                    ) || false;
+                  const isPending = isSending || isReceiving;
+
+                  return (
+                    <div
+                      key={wallet.id}
+                      className="border border-gray-800 rounded-xl p-4"
+                    >
+                      <div className="flex items-center gap-2 flex-wrap text-md">
+                        <span className="font-semibold text-base capitalize text-gray-100">
+                          {wallet.label || wallet.id}
                         </span>
+                        {isPending && (
+                          <span className="text-sm font-medium text-amber-400 animate-pulse flex items-center gap-1.5">
+                            <svg
+                              className="w-3 h-3 animate-spin"
+                              fill="none"
+                              stroke="currentColor"
+                              viewBox="0 0 24 24"
+                            >
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth={2}
+                                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                              />
+                            </svg>
+                            {isSending
+                              ? "Sending..."
+                              : isReceiving
+                              ? "Receiving..."
+                              : ""}
+                          </span>
+                        )}
+                        {wallet.balance !== undefined && (
+                          <>
+                            <span
+                              className={`text-sm font-medium ${
+                                isPending
+                                  ? "text-amber-400"
+                                  : wallet.balance.hasFunds
+                                  ? "text-emerald-400"
+                                  : "text-gray-400"
+                              }`}
+                            >
+                              {isPending && isReceiving
+                                ? "Loading..."
+                                : `${wallet.balance.ada} ADA`}
+                            </span>
+                            {!isPending &&
+                              wallet.balance.utxoCount !== undefined && (
+                                <span className="text-sm text-gray-100">
+                                  ({wallet.balance.utxoCount} UTXO
+                                  {wallet.balance.utxoCount !== 1 ? "s" : ""})
+                                </span>
+                              )}
+                          </>
+                        )}
+                        {wallet.cardanoAddress && (
+                          <span
+                            className="font-mono text-gray-400 text-xs truncate"
+                            title={wallet.cardanoAddress}
+                          >
+                            {wallet.cardanoAddress.slice(0, 12)}...
+                            {wallet.cardanoAddress.slice(-8)}
+                          </span>
+                        )}
+                      </div>
+                      {wallet.files && (
+                        <div className="flex gap-4 mt-1.5 text-xs">
+                          <div className="flex-1 min-w-0">
+                            <span className="text-gray-500">Cardano: </span>
+                            <div
+                              className="font-mono text-gray-400 truncate"
+                              title={wallet.files.paymentVkey}
+                            >
+                              {wallet.files.paymentVkey.split("/").pop()}
+                            </div>
+                            <div
+                              className="font-mono text-gray-400 truncate"
+                              title={wallet.files.paymentSkey}
+                            >
+                              {wallet.files.paymentSkey.split("/").pop()}
+                            </div>
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <span className="text-gray-500">Hydra: </span>
+                            <div
+                              className="font-mono text-gray-400 truncate"
+                              title={wallet.files.hydraVkey}
+                            >
+                              {wallet.files.hydraVkey.split("/").pop()}
+                            </div>
+                            <div
+                              className="font-mono text-gray-400 truncate"
+                              title={wallet.files.hydraSkey}
+                            >
+                              {wallet.files.hydraSkey.split("/").pop()}
+                            </div>
+                          </div>
+                        </div>
                       )}
                     </div>
-                    {wallet.files && (
-                      <div className="flex gap-4 mt-1.5 text-xs">
-                        <div className="flex-1 min-w-0">
-                          <span className="text-gray-500">Cardano: </span>
-                          <div
-                            className="font-mono text-gray-400 truncate"
-                            title={wallet.files.paymentVkey}
-                          >
-                            {wallet.files.paymentVkey.split("/").pop()}
-                          </div>
-                          <div
-                            className="font-mono text-gray-400 truncate"
-                            title={wallet.files.paymentSkey}
-                          >
-                            {wallet.files.paymentSkey.split("/").pop()}
-                          </div>
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <span className="text-gray-500">Hydra: </span>
-                          <div
-                            className="font-mono text-gray-400 truncate"
-                            title={wallet.files.hydraVkey}
-                          >
-                            {wallet.files.hydraVkey.split("/").pop()}
-                          </div>
-                          <div
-                            className="font-mono text-gray-400 truncate"
-                            title={wallet.files.hydraSkey}
-                          >
-                            {wallet.files.hydraSkey.split("/").pop()}
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
@@ -377,6 +421,7 @@ export default function WalletFactory({
         wallets={wallets}
         onClose={handleCloseSendModal}
         onSend={onSendAda}
+        pendingTransaction={pendingTransaction}
       />
     </>
   );

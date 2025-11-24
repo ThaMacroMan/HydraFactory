@@ -388,6 +388,8 @@ export default async function handler(
     let useIncrement = false;
     let isOpen = false; // Initialize isOpen to avoid undefined reference
     let headTag: string | null = null;
+    let hasCommitted = false;
+    let hasPendingCommits = false;
     const statusUrl = `http://127.0.0.1:${port}/head`;
     console.log(`[commit] Fetching head status from: ${statusUrl}`);
     const statusStartTime = Date.now();
@@ -405,8 +407,8 @@ export default async function handler(
         const statusData = await statusResponse.json();
         headTag = statusData.tag;
         console.log(`[commit] ✓ Head status retrieved successfully`);
-        const hasPendingCommits = (statusData.pendingCommits || 0) > 0;
-        const hasCommitted = (statusData.committed?.length || 0) > 0;
+        hasPendingCommits = (statusData.pendingCommits || 0) > 0;
+        hasCommitted = (statusData.committed?.length || 0) > 0;
         // If head is Open, check if there are UTXOs in the head (means it's already been committed to)
         const hasUtxosInHead = Boolean(
           statusData.utxo &&
@@ -455,6 +457,24 @@ export default async function handler(
               "The Hydra head is in Idle state and has not been initialized. Please initialize the head using the 'Init' button before attempting to commit UTXOs.",
             headTag,
           });
+        }
+
+        // Check if head is in "Initial" state but might not have validator script on-chain yet
+        // This can happen if initialization transaction hasn't been submitted or confirmed
+        if (headTag === "Initial") {
+          // Check if there's a pending initialization transaction
+          // If the head is Initial but has no committed UTXOs and no pending commits,
+          // it might mean the initialization transaction hasn't been submitted yet
+          const hasCommitted = (statusData.committed?.length || 0) > 0;
+          const hasPendingCommits = (statusData.pendingCommits || 0) > 0;
+
+          if (!hasCommitted && !hasPendingCommits) {
+            console.warn(
+              `[commit] Head is in Initial state but has no committed UTXOs or pending commits. This might indicate the initialization transaction hasn't been submitted or confirmed yet.`
+            );
+            // Don't block the commit, but log a warning
+            // The actual error will come from Hydra if the validator script is missing
+          }
         }
       } else {
         console.warn(
@@ -553,17 +573,65 @@ export default async function handler(
         console.error(
           `[commit] This usually means the Hydra head was not properly initialized with the validator script.`
         );
+        console.error(
+          `[commit] Head state: ${headTag || "unknown"}, Has committed: ${
+            hasCommitted || false
+          }, Pending commits: ${hasPendingCommits || false}`
+        );
+
+        // Extract script hash from error if available
+        const scriptHashMatch = errorText.match(
+          /ScriptHash\s+"([a-fA-F0-9]+)"/
+        );
+        const scriptHash = scriptHashMatch ? scriptHashMatch[1] : null;
+
         const totalTime = Date.now() - startTime;
         console.log(
           `[commit] ========== COMMIT FAILED (${totalTime}ms) ==========`
         );
+
+        let diagnosticMessage =
+          "Commit failed: The Hydra validator script is missing on-chain.";
+        let suggestions: string[] = [];
+
+        if (headTag === "Initial" && !hasCommitted && !hasPendingCommits) {
+          suggestions.push(
+            "The head is in Initial state but the initialization transaction may not have been submitted to the chain.",
+            "Please check if the initialization transaction was submitted and confirmed.",
+            "You may need to re-initialize the head if the initialization transaction failed."
+          );
+        } else if (headTag === "Initial") {
+          suggestions.push(
+            "The head is initialized but the validator script may not be confirmed on-chain yet.",
+            "Wait a few seconds for the initialization transaction to be confirmed, then try again.",
+            "Check the head status to see if there are any pending initialization transactions."
+          );
+        } else {
+          suggestions.push(
+            "Ensure all parties have initialized the head using the 'Init' button.",
+            "Wait for the head to be fully initialized before attempting to commit UTXOs.",
+            "If the head was recently initialized, wait a few seconds for the transaction to be confirmed on-chain."
+          );
+        }
+
         return res.status(response.status).json({
           error: errorText || `HTTP error! status: ${response.status}`,
           status: response.status,
           isScriptError: true,
           isMissingScript: true,
-          message:
-            "Commit failed: The Hydra validator script is missing. This typically means the Hydra head was not properly initialized. Please ensure all parties have initialized the head using the 'Init' button, and wait for the head to be fully initialized before attempting to commit UTXOs.",
+          scriptHash: scriptHash || undefined,
+          headTag: headTag || undefined,
+          message: diagnosticMessage,
+          suggestions,
+          troubleshooting: {
+            step1:
+              "Check if all parties have clicked 'Init' and the initialization transaction was submitted",
+            step2:
+              "Wait for the initialization transaction to be confirmed on-chain (usually takes a few seconds)",
+            step3:
+              "Verify the head status shows it's ready for commits (not Idle)",
+            step4: "If the issue persists, try re-initializing the head",
+          },
         });
       }
 
@@ -572,6 +640,164 @@ export default async function handler(
         console.error(
           `[commit] This usually means insufficient fees or collateral for the transaction.`
         );
+
+        // Try to extract transaction details from error for better diagnostics
+        // The error format is: TxIn (TxId {unTxId = SafeHash "..."}) (TxIx {unTxIx = N})
+        const txInputMatches =
+          errorText.match(
+            /TxIn\s*\(TxId\s*\{unTxId\s*=\s*SafeHash\s+"([a-fA-F0-9]+)"\}\)\s*\(TxIx\s*\{unTxIx\s*=\s*(\d+)\}\)/g
+          ) || [];
+
+        // Also try to extract just the hash and index separately for more flexibility
+        const hashMatches =
+          errorText.match(/SafeHash\s+"([a-fA-F0-9]{64})"/g) || [];
+        const indexMatches = errorText.match(/unTxIx\s*=\s*(\d+)/g) || [];
+
+        console.error(
+          `[commit] Transaction inputs from error (first 3):`,
+          txInputMatches.slice(0, 3)
+        );
+        console.error(
+          `[commit] Hash matches found: ${hashMatches.length}, Index matches: ${indexMatches.length}`
+        );
+        console.error(
+          `[commit] Available UTXOs in wallet:`,
+          Object.keys(allUtxos).slice(0, 5)
+        );
+
+        // Check if Hydra is trying to use a UTXO that doesn't exist in the wallet
+        let fuelUtxoIssue = false;
+        let missingFuelUtxo: string | null = null;
+        let missingFuelUtxoIndex: number | null = null;
+
+        // First try to match full TxIn patterns
+        for (const match of txInputMatches) {
+          const hashMatch = match.match(/SafeHash\s+"([a-fA-F0-9]+)"/);
+          const indexMatch = match.match(/unTxIx\s*=\s*(\d+)/);
+          if (hashMatch && hashMatch[1]) {
+            const txHash = hashMatch[1];
+            const txIndex = indexMatch ? parseInt(indexMatch[1], 10) : null;
+            const utxoKey = txIndex !== null ? `${txHash}#${txIndex}` : null;
+
+            // Check if this UTXO exists in the wallet (case-insensitive)
+            const utxoExists = utxoKey
+              ? Object.keys(allUtxos).some(
+                  (key) => key.toLowerCase() === utxoKey.toLowerCase()
+                )
+              : Object.keys(allUtxos).some((key) =>
+                  key.toLowerCase().startsWith(txHash.toLowerCase())
+                );
+
+            if (!utxoExists) {
+              fuelUtxoIssue = true;
+              missingFuelUtxo = txHash;
+              missingFuelUtxoIndex = txIndex;
+              console.error(
+                `[commit] ⚠️ Hydra is trying to use UTXO ${
+                  utxoKey || txHash
+                }... but it's not in the wallet's current UTXOs. This suggests Hydra's wallet state is stale.`
+              );
+              break;
+            }
+          }
+        }
+
+        // If no matches from full pattern, try extracting hashes directly
+        if (!fuelUtxoIssue && hashMatches.length > 0) {
+          for (const hashMatch of hashMatches) {
+            const hash = hashMatch.match(/SafeHash\s+"([a-fA-F0-9]+)"/)?.[1];
+            if (hash) {
+              // Check if any UTXO in wallet starts with this hash
+              const utxoExists = Object.keys(allUtxos).some((key) =>
+                key.toLowerCase().startsWith(hash.toLowerCase())
+              );
+              if (!utxoExists) {
+                fuelUtxoIssue = true;
+                missingFuelUtxo = hash;
+                console.error(
+                  `[commit] ⚠️ Hydra is trying to use UTXO with hash ${hash.substring(
+                    0,
+                    16
+                  )}... but it's not in the wallet's current UTXOs. This suggests Hydra's wallet state is stale.`
+                );
+                break;
+              }
+            }
+          }
+        }
+
+        const totalTime = Date.now() - startTime;
+        console.log(
+          `[commit] ========== COMMIT FAILED (${totalTime}ms) ==========`
+        );
+
+        let diagnosticMessage =
+          "Commit failed: Insufficient funds for transaction fees or collateral.";
+        let suggestions: string[] = [];
+
+        if (fuelUtxoIssue) {
+          const missingUtxoKey =
+            missingFuelUtxoIndex !== null
+              ? `${missingFuelUtxo?.substring(
+                  0,
+                  16
+                )}...#${missingFuelUtxoIndex}`
+              : `${missingFuelUtxo?.substring(0, 16)}...`;
+          diagnosticMessage = `Commit failed: Hydra is trying to use a fuel UTXO (${missingUtxoKey}) that doesn't exist or has been spent. This suggests Hydra's wallet state is out of sync with the chain. The fuel UTXO was likely created during initialization but has since been spent or moved.`;
+          suggestions.push(
+            "Hydra's internal wallet state is stale - the fuel UTXO it's trying to use was from the initialization transaction but has since been spent",
+            "This is a known issue: Hydra maintains an internal wallet state that can become stale after transactions",
+            "Wait a few seconds and try again - Hydra may need to sync its wallet state from the chain",
+            "Try refreshing your wallet UTXOs in the UI to see the current state",
+            "If the issue persists, you may need to restart the Hydra node to refresh its wallet state",
+            "As a workaround, try committing a different UTXO or wait for Hydra to automatically refresh its state"
+          );
+        } else {
+          suggestions.push(
+            "Ensure the UTXO has sufficient ADA (at least 2-3 ADA recommended for fees and collateral)",
+            "Try committing a larger UTXO that has more funds",
+            "Check your wallet balance and ensure you have enough funds",
+            "In Conway era, transactions require collateral for Plutus script validation"
+          );
+        }
+
+        return res.status(response.status).json({
+          error: errorText || `HTTP error! status: ${response.status}`,
+          status: response.status,
+          isScriptError: false,
+          isNotEnoughFuel: true,
+          isFuelUtxoIssue: fuelUtxoIssue,
+          missingFuelUtxo: missingFuelUtxo || undefined,
+          missingFuelUtxoIndex:
+            missingFuelUtxoIndex !== null ? missingFuelUtxoIndex : undefined,
+          missingFuelUtxoKey:
+            fuelUtxoIssue && missingFuelUtxo && missingFuelUtxoIndex !== null
+              ? `${missingFuelUtxo}#${missingFuelUtxoIndex}`
+              : fuelUtxoIssue && missingFuelUtxo
+              ? missingFuelUtxo
+              : undefined,
+          message: diagnosticMessage,
+          suggestions,
+          troubleshooting: fuelUtxoIssue
+            ? {
+                step1:
+                  "This is a wallet state sync issue - Hydra's view of your wallet UTXOs is stale",
+                step2:
+                  "The fuel UTXO Hydra is trying to use was from the initialization transaction but has since been spent",
+                step3:
+                  "Try waiting a few seconds and refreshing your wallet UTXOs - Hydra may auto-sync",
+                step4:
+                  "If the issue persists, restart the Hydra node to refresh its wallet state",
+                step5:
+                  "This is a known limitation: Hydra maintains internal wallet state that can become stale",
+              }
+            : {
+                step1:
+                  "Verify the UTXO has at least 2-3 ADA (not just the minimum 1 ADA)",
+                step2: "Try selecting a different UTXO with more funds",
+                step3: "Check if your wallet has sufficient balance for fees",
+              },
+        });
       }
 
       const totalTime = Date.now() - startTime;

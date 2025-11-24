@@ -61,9 +61,12 @@ export async function startHydraNode(node: string) {
   }
 }
 
-export async function startHydraNodeForWallet(config: WalletNodeConfig) {
+export async function startHydraNodeForWallet(
+  config: WalletNodeConfig,
+  scriptId?: string | null
+) {
   console.log(
-    `[startHydraNodeForWallet] Starting node for wallet: ${config.walletId}`
+    `[startHydraNodeForWallet] Starting node for wallet: ${config.walletId} with script: ${scriptId || 'default'}`
   );
 
   const {
@@ -75,6 +78,30 @@ export async function startHydraNodeForWallet(config: WalletNodeConfig) {
     peerPorts,
     otherWalletLabels,
   } = config;
+
+  // Get script TX IDs if scriptId is provided
+  let scriptsTxId = "$SCRIPTS_TX_ID"; // Default to environment variable
+  if (scriptId) {
+    try {
+      const { promises: fs } = await import("fs");
+      const scriptsFile = path.join(TMP_ROOT, "scripts", "scripts.json");
+      try {
+        const data = await fs.readFile(scriptsFile, "utf-8");
+        const scripts = JSON.parse(data);
+        const selectedScript = scripts.find((s: any) => s.id === scriptId);
+        if (selectedScript) {
+          scriptsTxId = selectedScript.txIds;
+          console.log(`[startHydraNodeForWallet] Using custom script: ${selectedScript.name}`);
+        } else {
+          console.warn(`[startHydraNodeForWallet] Script ${scriptId} not found, using default`);
+        }
+      } catch (error) {
+        console.warn(`[startHydraNodeForWallet] Error loading script ${scriptId}, using default:`, error);
+      }
+    } catch (error) {
+      console.warn(`[startHydraNodeForWallet] Error importing fs, using default script:`, error);
+    }
+  }
 
   // Check if node is already running by checking the API port
   try {
@@ -162,7 +189,7 @@ ${
 }  --hydra-signing-key ${escapeShell(hydraSigningKey)} \\
 ${
   hydraVkeyArgsEscaped ? hydraVkeyArgsEscaped + "\n" : ""
-}  --hydra-scripts-tx-id "$SCRIPTS_TX_ID" \\
+}  --hydra-scripts-tx-id "${scriptsTxId}" \\
   --ledger-protocol-parameters ${escapeShell(protocolParams)} \\
   --testnet-magic 1 \\
   --node-socket "$CARDANO_NODE_SOCKET_PATH" \\

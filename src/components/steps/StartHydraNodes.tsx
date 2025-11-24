@@ -28,6 +28,16 @@ interface NodeStatus {
   error?: string;
 }
 
+interface CustomScript {
+  id: string;
+  name: string;
+  description?: string;
+  txIds: string;
+  network: "preprod" | "mainnet" | "preview";
+  createdAt: string;
+  isDefault?: boolean;
+}
+
 interface HydraNodesProps {
   wallets: WalletPair[];
   selectedWalletIds: string[];
@@ -46,10 +56,12 @@ function CopyButton({
   text,
   copied,
   onCopy,
+  label,
 }: {
   text: string;
   copied: boolean;
   onCopy: (e?: React.MouseEvent) => void;
+  label?: string;
 }) {
   const handleCopy = async (e?: React.MouseEvent) => {
     if (e) {
@@ -73,8 +85,83 @@ function CopyButton({
       }`}
       title="Copy to clipboard"
     >
-      {copied ? "✓" : "Copy"}
+      {copied ? "✓" : label || "Copy"}
     </button>
+  );
+}
+
+function CompactErrorBox({
+  error,
+  visible,
+  copied,
+  onClose,
+  onCopy,
+}: {
+  error: string;
+  visible: boolean;
+  copied: boolean;
+  onClose: () => void;
+  onCopy: () => void;
+}) {
+  if (!visible || !error) return null;
+
+  const handleCopy = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      await navigator.clipboard.writeText(error);
+      onCopy();
+    } catch (err) {
+      console.error("Failed to copy:", err);
+    }
+  };
+
+  return (
+    <div
+      className="flex items-center gap-1.5 px-2 py-1 bg-red-950/30 border border-red-500/30 rounded text-[10px] text-red-400 max-w-xs cursor-pointer hover:bg-red-950/40 hover:border-red-500/50 transition"
+      onClick={handleCopy}
+      title="Click to copy error"
+    >
+      <svg
+        className="w-3 h-3 flex-shrink-0 text-red-400"
+        fill="none"
+        stroke="currentColor"
+        viewBox="0 0 24 24"
+      >
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth={2}
+          d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+        />
+      </svg>
+      <span className="truncate flex-1 min-w-0">{error}</span>
+      {copied ? (
+        <span className="text-[9px] text-green-400 flex-shrink-0">Copied!</span>
+      ) : (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onClose();
+          }}
+          className="flex-shrink-0 text-red-400 hover:text-red-300 transition"
+          title="Close error"
+        >
+          <svg
+            className="w-3 h-3"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M6 18L18 6M6 6l12 12"
+            />
+          </svg>
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -97,14 +184,22 @@ export default function HydraNodes({
   const [copiedCommands, setCopiedCommands] = useState<Record<string, boolean>>(
     {}
   );
+  const [copiedLogs, setCopiedLogs] = useState<Record<string, boolean>>({});
   const [startingNodes, setStartingNodes] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
+  const [startErrorVisible, setStartErrorVisible] = useState(true);
+  const [startErrorCopied, setStartErrorCopied] = useState(false);
   const [stoppingNodes, setStoppingNodes] = useState(false);
   const [cleaningUp, setCleaningUp] = useState(false);
   const [cleanupError, setCleanupError] = useState<string | null>(null);
+  const [cleanupErrorVisible, setCleanupErrorVisible] = useState(true);
+  const [cleanupErrorCopied, setCleanupErrorCopied] = useState(false);
   const [stateFileInitializing, setStateFileInitializing] = useState<
     Record<string, boolean>
   >({});
+  const [scripts, setScripts] = useState<CustomScript[]>([]);
+  const [selectedScriptId, setSelectedScriptId] = useState<string | null>(null);
+  const [loadingScripts, setLoadingScripts] = useState(true);
   const isCheckingStatusRef = useRef(false);
   const onRefreshStatusRef = useRef(onRefreshStatus);
   const onNodeStatusUpdateRef = useRef(onNodeStatusUpdate);
@@ -114,6 +209,32 @@ export default function HydraNodes({
   const onHeadStatusUpdateRef = useRef(onHeadStatusUpdate);
   const headStatusRef = useRef(headStatus);
   const intervalRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Load scripts on mount
+  useEffect(() => {
+    const loadScripts = async () => {
+      try {
+        setLoadingScripts(true);
+        const res = await fetch("/api/scripts/list");
+        if (res.ok) {
+          const data = await res.json();
+          setScripts(data.scripts || []);
+          // Auto-select default script if available
+          const defaultScript = data.scripts?.find((s: CustomScript) => s.isDefault);
+          if (defaultScript) {
+            setSelectedScriptId(defaultScript.id);
+          } else if (data.scripts?.length > 0) {
+            setSelectedScriptId(data.scripts[0].id);
+          }
+        }
+      } catch (error) {
+        console.error("Error loading scripts:", error);
+      } finally {
+        setLoadingScripts(false);
+      }
+    };
+    loadScripts();
+  }, []);
 
   // Keep the refs updated with the latest callbacks and head status
   useEffect(() => {
@@ -253,13 +374,35 @@ export default function HydraNodes({
   const handleStartAllNodes = async () => {
     if (selectedWalletIds.length === 0) {
       setStartError("Please select at least one wallet");
+      setStartErrorVisible(true);
+      setStartErrorCopied(false);
       return;
     }
 
     setStartingNodes(true);
     setStartError(null);
+    setStartErrorVisible(true);
+    setStartErrorCopied(false);
 
     try {
+      // Clean up persistence for selected wallets before starting nodes
+      // This prevents PartiesMismatch errors when switching wallet combinations
+      try {
+        const cleanupResponse = await fetch("/api/nodes/cleanup", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ walletIds: selectedWalletIds }),
+        });
+
+        if (cleanupResponse.ok) {
+          const cleanupResult = await cleanupResponse.json();
+          console.log("Cleaned up persistence before starting nodes:", cleanupResult);
+        }
+      } catch (cleanupError) {
+        // Log but don't fail - cleanup is best effort
+        console.warn("Failed to cleanup persistence before starting nodes:", cleanupError);
+      }
+
       // Build wallet configurations
       const walletConfigs = selectedWalletIds.map((walletId, index) => {
         const wallet = wallets.find((w) => w.id === walletId);
@@ -297,7 +440,10 @@ export default function HydraNodes({
       const response = await fetch("/api/nodes/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ wallets: walletConfigs }),
+        body: JSON.stringify({ 
+          wallets: walletConfigs,
+          scriptId: selectedScriptId,
+        }),
       });
 
       if (!response.ok) {
@@ -308,10 +454,26 @@ export default function HydraNodes({
       const result = await response.json();
 
       if (result.errors && result.errors.length > 0) {
-        const errorMessages = result.errors
-          .map((e: any) => `${e.walletId}: ${e.error}`)
-          .join(", ");
-        setStartError(`Some nodes failed to start: ${errorMessages}`);
+        // Check if any errors are PartiesMismatch related
+        const hasPartiesMismatch = result.errors.some((e: any) =>
+          e.error?.includes("PartiesMismatch") || e.error?.includes("ParameterMismatch")
+        );
+
+        let errorMessage = "Some nodes failed to start: ";
+        if (hasPartiesMismatch) {
+          errorMessage +=
+            "PartiesMismatch detected - persisted state doesn't match current wallet selection. ";
+          errorMessage +=
+            "Persistence has been cleaned up. Please try starting nodes again.";
+        } else {
+          errorMessage += result.errors
+            .map((e: any) => `${e.walletId}: ${e.error}`)
+            .join(", ");
+        }
+
+        setStartError(errorMessage);
+        setStartErrorVisible(true);
+        setStartErrorCopied(false);
       }
 
       // Refresh node status after a short delay, then check again for stability
@@ -329,6 +491,8 @@ export default function HydraNodes({
     } catch (error) {
       console.error("Error starting nodes:", error);
       setStartError((error as Error).message);
+      setStartErrorVisible(true);
+      setStartErrorCopied(false);
     } finally {
       setStartingNodes(false);
     }
@@ -337,6 +501,8 @@ export default function HydraNodes({
   const handleStopNodes = async () => {
     setStoppingNodes(true);
     setCleanupError(null);
+    setCleanupErrorVisible(true);
+    setCleanupErrorCopied(false);
 
     try {
       const stopResponse = await fetch("/api/nodes/stop", {
@@ -364,6 +530,8 @@ export default function HydraNodes({
     } catch (error) {
       console.error("Error stopping nodes:", error);
       setCleanupError((error as Error).message);
+      setCleanupErrorVisible(true);
+      setCleanupErrorCopied(false);
     } finally {
       setStoppingNodes(false);
     }
@@ -380,6 +548,8 @@ export default function HydraNodes({
 
     setCleaningUp(true);
     setCleanupError(null);
+    setCleanupErrorVisible(true);
+    setCleanupErrorCopied(false);
 
     try {
       const cleanupResponse = await fetch("/api/nodes/cleanup", {
@@ -400,6 +570,8 @@ export default function HydraNodes({
         setCleanupError(
           `Some errors occurred: ${cleanupResult.errors.join(", ")}`
         );
+        setCleanupErrorVisible(true);
+        setCleanupErrorCopied(false);
       }
 
       // Refresh status
@@ -413,6 +585,8 @@ export default function HydraNodes({
     } catch (error) {
       console.error("Error cleaning up persistence:", error);
       setCleanupError((error as Error).message);
+      setCleanupErrorVisible(true);
+      setCleanupErrorCopied(false);
     } finally {
       setCleaningUp(false);
     }
@@ -490,6 +664,39 @@ export default function HydraNodes({
       {expanded && (
         <div className="px-6 py-6 space-y-4 border-t border-gray-800">
           <div className="space-y-4">
+            {/* Script Selector */}
+            <div className="bg-gray-800/50 border border-gray-700 rounded-lg p-4">
+              <label className="block text-sm text-gray-300 font-medium mb-2">
+                Hydra Script
+              </label>
+              {loadingScripts ? (
+                <div className="text-xs text-gray-400">Loading scripts...</div>
+              ) : scripts.length === 0 ? (
+                <div className="text-xs text-gray-400">
+                  No scripts available. Create one in the Custom Scripts section.
+                </div>
+              ) : (
+                <select
+                  value={selectedScriptId || ""}
+                  onChange={(e) => setSelectedScriptId(e.target.value || null)}
+                  className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-lg text-sm text-gray-200 focus:outline-none focus:border-blue-500"
+                >
+                  {scripts.map((script) => (
+                    <option key={script.id} value={script.id}>
+                      {script.name}
+                      {script.isDefault ? " (Default)" : ""} - {script.network}
+                    </option>
+                  ))}
+                </select>
+              )}
+              {selectedScriptId && (
+                <p className="text-xs text-gray-500 mt-2">
+                  Selected:{" "}
+                  {scripts.find((s) => s.id === selectedScriptId)?.name || "Unknown"}
+                </p>
+              )}
+            </div>
+
             {selectedWalletIds.length > 0 && (
               <div className="space-y-4">
                 <div className="flex flex-col lg:flex-row lg:items-center gap-4">
@@ -593,15 +800,27 @@ export default function HydraNodes({
                       >
                         {cleaningUp ? "Clearing..." : "Clear History"}
                       </button>
+                      <CompactErrorBox
+                        error={startError || ""}
+                        visible={startErrorVisible}
+                        copied={startErrorCopied}
+                        onClose={() => setStartErrorVisible(false)}
+                        onCopy={() => {
+                          setStartErrorCopied(true);
+                          setTimeout(() => setStartErrorCopied(false), 2000);
+                        }}
+                      />
+                      <CompactErrorBox
+                        error={cleanupError || ""}
+                        visible={cleanupErrorVisible}
+                        copied={cleanupErrorCopied}
+                        onClose={() => setCleanupErrorVisible(false)}
+                        onCopy={() => {
+                          setCleanupErrorCopied(true);
+                          setTimeout(() => setCleanupErrorCopied(false), 2000);
+                        }}
+                      />
                     </div>
-                    {startError && (
-                      <p className="text-xs text-red-400 mt-2">{startError}</p>
-                    )}
-                    {cleanupError && (
-                      <p className="text-xs text-red-400 mt-2">
-                        {cleanupError}
-                      </p>
-                    )}
                   </div>
                   <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg px-4 py-2 flex-shrink-0 lg:max-w-md">
                     <div className="flex items-center gap-2">
@@ -697,6 +916,14 @@ export default function HydraNodes({
                             })
                             .join("\n");
 
+                          // Get selected script's TX IDs or use default
+                          const selectedScript = scripts.find(
+                            (s) => s.id === selectedScriptId
+                          );
+                          const scriptsTxId = selectedScript
+                            ? selectedScript.txIds
+                            : "$SCRIPTS_TX_ID";
+
                           const command = `cd .cardano && source ../scripts/setup-env.sh && cd .. && \\
 source /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh && \\
 .hydra/hydra-node \\
@@ -711,7 +938,7 @@ ${
 }  --hydra-signing-key .tmp/wallets/${walletLabel}/hydra.skey \\
 ${
   hydraVkeyLines ? hydraVkeyLines + "\n" : ""
-}  --hydra-scripts-tx-id "$SCRIPTS_TX_ID" \\
+}  --hydra-scripts-tx-id "${scriptsTxId}" \\
   --ledger-protocol-parameters .hydra/protocol-parameters.json \\
   --testnet-magic 1 \\
   --node-socket "$CARDANO_NODE_SOCKET_PATH" \\
@@ -773,23 +1000,94 @@ ${
                                     {online ? "Online" : "Offline"}
                                   </span>
                                 </div>
-                                <CopyButton
-                                  text={command}
-                                  copied={isCopied}
-                                  onCopy={(e) => {
-                                    setCopiedCommands((prev) => ({
-                                      ...prev,
-                                      [walletId]: true,
-                                    }));
-                                  }}
-                                />
+                                <div className="flex items-center gap-2">
+                                  {online && (
+                                    <CopyButton
+                                      text={`tail -f .tmp/logs/hydra-${walletId}.log`}
+                                      copied={copiedLogs[walletId] ?? false}
+                                      onCopy={(e) => {
+                                        setCopiedLogs((prev) => ({
+                                          ...prev,
+                                          [walletId]: true,
+                                        }));
+                                        setTimeout(() => {
+                                          setCopiedLogs((prev) => ({
+                                            ...prev,
+                                            [walletId]: false,
+                                          }));
+                                        }, 2000);
+                                      }}
+                                      label="Logs Command"
+                                    />
+                                  )}
+                                  <CopyButton
+                                    text={command}
+                                    copied={isCopied}
+                                    onCopy={(e) => {
+                                      setCopiedCommands((prev) => ({
+                                        ...prev,
+                                        [walletId]: true,
+                                      }));
+                                    }}
+                                    label="Start Command"
+                                  />
+                                </div>
                               </button>
                               {isCommandExpanded && (
-                                <div className="px-3 pb-3 pt-2 border-t border-gray-700/30">
-                                  <div className="bg-black/60 rounded p-2.5 font-mono text-[10px] leading-relaxed whitespace-pre overflow-x-auto">
-                                    <code className="block text-gray-300">
-                                      {command}
-                                    </code>
+                                <div className="px-3 pb-3 pt-2 border-t border-gray-700/30 space-y-3">
+                                  {online && (
+                                    <div>
+                                      <div className="flex items-center justify-between mb-1.5">
+                                        <p className="text-[10px] text-gray-400 font-medium">
+                                          Logs Command
+                                        </p>
+                                        <CopyButton
+                                          text={`tail -f .tmp/logs/hydra-${walletId}.log`}
+                                          copied={copiedLogs[walletId] ?? false}
+                                          onCopy={(e) => {
+                                            setCopiedLogs((prev) => ({
+                                              ...prev,
+                                              [walletId]: true,
+                                            }));
+                                            setTimeout(() => {
+                                              setCopiedLogs((prev) => ({
+                                                ...prev,
+                                                [walletId]: false,
+                                              }));
+                                            }, 2000);
+                                          }}
+                                          label="Copy"
+                                        />
+                                      </div>
+                                      <div className="bg-black/60 rounded p-2.5 font-mono text-[10px] leading-relaxed whitespace-pre overflow-x-auto">
+                                        <code className="block text-gray-300">
+                                          {`tail -f .tmp/logs/hydra-${walletId}.log`}
+                                        </code>
+                                      </div>
+                                    </div>
+                                  )}
+                                  <div>
+                                    <div className="flex items-center justify-between mb-1.5">
+                                      <p className="text-[10px] text-gray-400 font-medium">
+                                        Start Command
+                                      </p>
+                                      <CopyButton
+                                        text={command}
+                                        copied={isCopied}
+                                        onCopy={(e) => {
+                                          setCopiedCommands((prev) => ({
+                                            ...prev,
+                                            [walletId]: true,
+                                          }));
+                                        }}
+                                        label="Copy"
+                                      />
+                                    </div>
+                                    <div className="bg-black/60 rounded p-2.5 font-mono text-[10px] leading-relaxed whitespace-pre overflow-x-auto">
+                                      <code className="block text-gray-300">
+                                        {command}
+                                      </code>
+                                    </div>
                                   </div>
                                   {status?.error && (
                                     <p className="text-[10px] text-red-400 mt-2">

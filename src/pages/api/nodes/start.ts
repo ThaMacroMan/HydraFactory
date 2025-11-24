@@ -11,8 +11,8 @@ export default async function handler(
   }
 
   try {
-    const { node, wallets } = req.body ?? {};
-    console.log("[nodes/start] Request received:", { node, wallets, body: req.body });
+    const { node, wallets, scriptId } = req.body ?? {};
+    console.log("[nodes/start] Request received:", { node, wallets, scriptId, body: req.body });
     
     // Support both old format (single node) and new format (multiple wallets)
     if (node) {
@@ -25,10 +25,10 @@ export default async function handler(
     
     if (wallets && Array.isArray(wallets) && wallets.length > 0) {
       // New format: start multiple nodes for wallets
-      console.log(`[nodes/start] Starting ${wallets.length} Hydra nodes`);
+      console.log(`[nodes/start] Starting ${wallets.length} Hydra nodes with script: ${scriptId || 'default'}`);
       
       const results = await Promise.allSettled(
-        wallets.map((config: WalletNodeConfig) => startHydraNodeForWallet(config))
+        wallets.map((config: WalletNodeConfig) => startHydraNodeForWallet(config, scriptId))
       );
       
       const successResults: any[] = [];

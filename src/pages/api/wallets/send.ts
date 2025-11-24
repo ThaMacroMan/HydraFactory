@@ -11,12 +11,19 @@ const CARDANO_NODE_SOCKET = path.join(CARDANO_ROOT, "node.socket");
 const WALLET_BASE = path.join(TMP_ROOT, "wallets");
 const PROTOCOL_PARAMS = path.join(CARDANO_ROOT, "protocol-parameters.json");
 
+interface Recipient {
+  address: string;
+  amounts: string[]; // Array of amounts in ADA for multiple UTXOs
+}
+
 interface SendRequest {
   fromWalletId?: string; // UUID - for backward compatibility
   fromWalletLabel?: string; // Wallet label (directory name) - preferred
   fromWalletAddress?: string; // Wallet address - passed to avoid lookup
-  toAddress: string;
-  amount: string; // in ADA
+  toAddress?: string; // Single recipient (backward compatibility)
+  amount?: string; // Single amount in ADA (backward compatibility)
+  amounts?: string[]; // Array of amounts for single recipient (backward compatibility)
+  recipients?: Recipient[]; // Multiple recipients, each with multiple amounts
 }
 
 export default async function handler(
@@ -38,12 +45,52 @@ export default async function handler(
       });
     }
 
-    const { fromWalletId, fromWalletLabel, fromWalletAddress, toAddress, amount }: SendRequest = req.body;
+    const { fromWalletId, fromWalletLabel, fromWalletAddress, toAddress, amount, amounts, recipients }: SendRequest = req.body;
 
-    if ((!fromWalletId && !fromWalletLabel) || !toAddress || !amount) {
+    if (!fromWalletId && !fromWalletLabel) {
       return res.status(400).json({
-        error: "fromWalletId or fromWalletLabel, toAddress, and amount are required",
+        error: "fromWalletId or fromWalletLabel is required",
       });
+    }
+
+    // Support new format (multiple recipients) and backward compatibility (single recipient)
+    let recipientsList: Recipient[];
+    if (recipients && recipients.length > 0) {
+      // New format: multiple recipients
+      recipientsList = recipients;
+    } else if (toAddress) {
+      // Backward compatibility: single recipient
+      const amountsToSend = amounts || (amount ? [amount] : []);
+      if (amountsToSend.length === 0) {
+        return res.status(400).json({
+          error: "At least one amount is required",
+        });
+      }
+      recipientsList = [{ address: toAddress, amounts: amountsToSend }];
+    } else {
+      return res.status(400).json({
+        error: "Either recipients array or toAddress with amount/amounts is required",
+      });
+    }
+
+    // Validate recipients
+    if (recipientsList.length === 0) {
+      return res.status(400).json({
+        error: "At least one recipient is required",
+      });
+    }
+
+    for (const recipient of recipientsList) {
+      if (!recipient.address) {
+        return res.status(400).json({
+          error: "All recipients must have an address",
+        });
+      }
+      if (!recipient.amounts || recipient.amounts.length === 0) {
+        return res.status(400).json({
+          error: "All recipients must have at least one amount",
+        });
+      }
     }
 
     // Find the wallet directory - prefer label (directory name) for faster lookup
@@ -94,11 +141,22 @@ export default async function handler(
     // Use provided address if available, otherwise read from file
     const fromAddress = fromWalletAddress || (await fs.readFile(addressFile, "utf8")).trim();
 
-    // Convert ADA to lovelace (1 ADA = 1,000,000 lovelace)
-    const lovelace = Math.floor(parseFloat(amount) * 1_000_000);
+    // Convert all amounts from ADA to lovelace (1 ADA = 1,000,000 lovelace)
+    // Build a flat list of all outputs: { address, lovelace }
+    const outputs: Array<{ address: string; lovelace: number }> = [];
+    for (const recipient of recipientsList) {
+      for (const amountStr of recipient.amounts) {
+        const lovelace = Math.floor(parseFloat(amountStr) * 1_000_000);
+        if (lovelace <= 0) {
+          return res.status(400).json({ error: `Invalid amount: ${amountStr}` });
+        }
+        outputs.push({ address: recipient.address, lovelace });
+      }
+    }
 
-    if (lovelace <= 0) {
-      return res.status(400).json({ error: "Amount must be greater than 0" });
+    const requestedLovelace = outputs.reduce((sum, o) => sum + o.lovelace, 0);
+    if (requestedLovelace <= 0) {
+      return res.status(400).json({ error: "Total amount must be greater than 0" });
     }
 
     // Check if socket exists
@@ -138,7 +196,7 @@ export default async function handler(
     const utxoOutput = utxoResult.stdout || "";
 
     // Parse UTxO to find sufficient funds
-    let totalLovelace = BigInt(0);
+    let availableLovelace = BigInt(0);
     const utxos: Array<{ txHash: string; txIx: string; lovelace: bigint }> = [];
 
     // Check if output is JSON format
@@ -151,7 +209,7 @@ export default async function handler(
             const [txHash, txIx] = utxoKey.split("#");
             const lovelace = BigInt(utxo.value.lovelace);
             utxos.push({ txHash, txIx: txIx || "0", lovelace });
-            totalLovelace += lovelace;
+            availableLovelace += lovelace;
           }
         }
       } catch (parseError) {
@@ -172,7 +230,7 @@ export default async function handler(
           if (lovelaceMatch) {
             const lovelace = BigInt(lovelaceMatch[1]);
             utxos.push({ txHash, txIx, lovelace });
-            totalLovelace += lovelace;
+            availableLovelace += lovelace;
           }
         }
       }
@@ -182,15 +240,16 @@ export default async function handler(
       return res.status(400).json({ error: "No UTxO found in source wallet" });
     }
 
-    if (totalLovelace < BigInt(lovelace)) {
+    // Calculate fee (rough estimate, will be refined)
+    // Fee increases with more outputs
+    const estimatedFee = 200_000 + (outputs.length - 1) * 50_000; // Base fee + 0.05 ADA per additional output
+    const totalNeeded = BigInt(requestedLovelace + estimatedFee);
+
+    if (availableLovelace < totalNeeded) {
       return res.status(400).json({
-        error: `Insufficient funds. Available: ${Number(totalLovelace) / 1_000_000} ADA, Requested: ${amount} ADA`,
+        error: `Insufficient funds. Available: ${Number(availableLovelace) / 1_000_000} ADA, Requested: ${requestedLovelace / 1_000_000} ADA + fees`,
       });
     }
-
-    // Calculate fee (rough estimate, will be refined)
-    const estimatedFee = 200_000; // 0.2 ADA
-    const totalNeeded = BigInt(lovelace + estimatedFee);
 
     // Select UTxOs to cover the amount + fee
     const selectedUtxos: typeof utxos = [];
@@ -223,11 +282,14 @@ export default async function handler(
       buildArgs.push("--tx-in", `${utxo.txHash}#${utxo.txIx}`);
     }
 
-    // Add output to recipient
-    // --change-address ensures any excess funds (after amount + fees) are returned to sender
+    // Add outputs for all recipients (one for each amount)
+    // This creates multiple UTXOs across all recipient wallets
+    for (const output of outputs) {
+      buildArgs.push("--tx-out", `${output.address}+${output.lovelace}`);
+    }
+
+    // --change-address ensures any excess funds (after amounts + fees) are returned to sender
     buildArgs.push(
-      "--tx-out",
-      `${toAddress}+${lovelace}`,
       "--change-address",
       fromAddress, // Change UTXOs are returned to the sending wallet
       "--out-file",
@@ -314,10 +376,16 @@ export default async function handler(
     console.log(`[wallet:send] ========== SEND REQUEST SUCCESS ==========`);
     console.log(`[wallet:send] Total time: ${totalTime.toFixed(2)}ms`);
     
+    const totalAmount = (requestedLovelace / 1_000_000).toFixed(6);
+    const recipientCount = recipientsList.length;
+    const uniqueAddresses = new Set(recipientsList.map(r => r.address));
     return res.status(200).json({
       success: true,
-      message: `Successfully sent ${amount} ADA to ${toAddress}`,
+      message: `Successfully sent ${outputs.length} UTXO${outputs.length > 1 ? 's' : ''} (${totalAmount} ADA total) to ${uniqueAddresses.size} recipient${uniqueAddresses.size > 1 ? 's' : ''}`,
       txHash: submitResult.stdout?.trim() || "Transaction submitted",
+      outputs: outputs.length,
+      recipients: uniqueAddresses.size,
+      totalAmount,
     });
   } catch (error) {
     const totalTime = performance.now() - totalStart;

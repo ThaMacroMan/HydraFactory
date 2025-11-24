@@ -40,7 +40,15 @@ export CARDANO_NODE_NETWORK_ID=1
 # Hydra scripts TX ID for preprod (required by hydra-node)
 # This is the transaction ID where Hydra's initial smart contract scripts are deployed                                                                          
 # For Hydra 1.1.0 on preprod - three comma-separated transaction IDs
-export SCRIPTS_TX_ID="407bf714186db790f2624701b2e065850dd7b7cf998c931222d99a56d8ad256b,4cae9ad9c1cc4f82ce2fd51f9e1155a37ac88957f81128ba1c51bc7c6734ce6c,a3a27a3049be1fe931a0d99bf132a88b848b12dc50f50856cb86e12bb135f5d2"
+# Default: Official Hydra scripts for preprod
+# Override: Set CUSTOM_SCRIPTS_TX_ID environment variable to use custom scripts
+# Format: Comma-separated transaction IDs (e.g., "tx1,tx2,tx3")
+if [ -z "${CUSTOM_SCRIPTS_TX_ID:-}" ]; then
+  export SCRIPTS_TX_ID="407bf714186db790f2624701b2e065850dd7b7cf998c931222d99a56d8ad256b,4cae9ad9c1cc4f82ce2fd51f9e1155a37ac88957f81128ba1c51bc7c6734ce6c,a3a27a3049be1fe931a0d99bf132a88b848b12dc50f50856cb86e12bb135f5d2"
+else
+  export SCRIPTS_TX_ID="$CUSTOM_SCRIPTS_TX_ID"
+  echo "  Using custom scripts TX ID: $SCRIPTS_TX_ID"
+fi
 
 # Mark as sourced
 export HYDRA_ENV_SET=1

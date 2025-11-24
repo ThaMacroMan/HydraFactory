@@ -1,6 +1,12 @@
 import Head from "next/head";
 import Image from "next/image";
-import { useEffect, useState, useCallback, useRef, startTransition } from "react";
+import {
+  useEffect,
+  useState,
+  useCallback,
+  useRef,
+  startTransition,
+} from "react";
 import { TransactionLogEntry } from "@/components/TransactionLog";
 import { HeadStatus, Party, HydraAPIClient } from "@/lib/hydra-client";
 import CardanoNodeSetup from "@/components/steps/CardanoNodeSetup";
@@ -80,6 +86,18 @@ export default function Home() {
   );
   const fetchingUtxosRef = useRef<Record<string, boolean>>({});
   const [isInitialLoading, setIsInitialLoading] = useState(true);
+  const [pendingTransaction, setPendingTransaction] = useState<{
+    fromWalletId: string;
+    toAddresses: string[]; // All recipient addresses
+    amount: string;
+    initialFromBalance: number;
+    initialToBalances: Record<string, number>; // Balance for each recipient
+    expectedAmount: number;
+    startTime: number;
+  } | null>(null);
+  const pendingTransactionRef = useRef<ReturnType<typeof setInterval> | null>(
+    null
+  );
   const fetchHistoryRef = useRef<(() => Promise<void>) | null>(null);
   // Flag to prevent history refresh from hydraStatus changes right after transaction
   const skipNextHistoryRefreshRef = useRef(false);
@@ -380,6 +398,59 @@ export default function Home() {
   // Removed automatic balance polling - balances are now refreshed manually via refresh button
   // This reduces API calls and improves page performance
 
+  // Watch for balance changes to detect when pending transaction is confirmed
+  useEffect(() => {
+    if (!pendingTransaction) return;
+
+    const fromWallet = wallets.find(
+      (w) => w.id === pendingTransaction.fromWalletId
+    );
+
+    if (!fromWallet) return;
+
+    const currentFromBalance = fromWallet.balance?.ada
+      ? parseFloat(fromWallet.balance.ada)
+      : 0;
+
+    // Check if sender balance decreased (transaction confirmed)
+    const fromBalanceDecreased =
+      currentFromBalance <
+      pendingTransaction.initialFromBalance -
+        pendingTransaction.expectedAmount * 0.9; // Allow 10% tolerance for fees
+
+    // Check all recipients to see if any received funds
+    let anyRecipientReceived = false;
+    for (const toAddress of pendingTransaction.toAddresses) {
+      const toWallet = wallets.find((w) => w.cardanoAddress === toAddress);
+      if (toWallet) {
+        const currentToBalance = toWallet.balance?.ada
+          ? parseFloat(toWallet.balance.ada)
+          : 0;
+        const initialToBalance =
+          pendingTransaction.initialToBalances[toAddress] || 0;
+
+        if (
+          currentToBalance >
+          initialToBalance + pendingTransaction.expectedAmount * 0.1
+        ) {
+          anyRecipientReceived = true;
+          break;
+        }
+      }
+    }
+
+    if (fromBalanceDecreased || anyRecipientReceived) {
+      console.log(
+        `[sendAda] Transaction confirmed! From: ${pendingTransaction.initialFromBalance} -> ${currentFromBalance}`
+      );
+      if (pendingTransactionRef.current) {
+        clearInterval(pendingTransactionRef.current);
+        pendingTransactionRef.current = null;
+      }
+      setPendingTransaction(null);
+    }
+  }, [wallets, pendingTransaction]);
+
   // Refresh UTXOs for all wallets when refreshing balances
   const refreshWalletUtxos = useCallback(() => {
     wallets.forEach((wallet) => {
@@ -550,9 +621,7 @@ export default function Home() {
           !errorMessage.includes("UTXO not found") &&
           !errorMessage.includes("has no value")
         ) {
-          alert(
-            `Failed to split UTXO for ${walletLabel}: ${errorMessage}`
-          );
+          alert(`Failed to split UTXO for ${walletLabel}: ${errorMessage}`);
         }
       }
     }
@@ -564,7 +633,10 @@ export default function Home() {
   }, [wallets, walletUtxosCache, fetchWalletUtxos, refreshWalletUtxos]);
 
   const sendAda = useCallback(
-    async (fromWalletId: string, toAddress: string, amount: string) => {
+    async (
+      fromWalletId: string,
+      recipients: Array<{ address: string; amounts: string[] }>
+    ) => {
       const startTime = performance.now();
       console.log(`[sendAda] ========== SEND ADA START ==========`);
       console.log(`[sendAda] Start time: ${new Date().toISOString()}`);
@@ -574,12 +646,18 @@ export default function Home() {
       const fromWalletLabel = fromWallet?.label;
       const fromWalletAddress = fromWallet?.cardanoAddress;
 
+      const totalAmount = recipients
+        .reduce(
+          (sum, r) => sum + r.amounts.reduce((s, a) => s + parseFloat(a), 0),
+          0
+        )
+        .toFixed(6);
       console.log(`[sendAda] Parameters:`, {
         fromWalletId,
         fromWalletLabel,
         fromWalletAddress,
-        toAddress,
-        amount,
+        recipientsCount: recipients.length,
+        totalAmount,
       });
 
       const prepareStart = performance.now();
@@ -587,8 +665,7 @@ export default function Home() {
         fromWalletLabel, // Use label for faster directory lookup
         fromWalletId, // Keep for backward compatibility
         fromWalletAddress, // Pass address to avoid API lookup
-        toAddress,
-        amount,
+        recipients, // Array of recipients, each with multiple amounts
       };
       const prepareTime = performance.now() - prepareStart;
       console.log(
@@ -616,6 +693,12 @@ export default function Home() {
         console.error(`[sendAda] ========== SEND ADA ERROR ==========`);
         console.error(`[sendAda] Total time: ${totalTime.toFixed(2)}ms`);
         console.error(`[sendAda] Error data:`, data);
+        // Clear pending transaction on error
+        if (pendingTransactionRef.current) {
+          clearInterval(pendingTransactionRef.current);
+          pendingTransactionRef.current = null;
+        }
+        setPendingTransaction(null);
         throw new Error(data.error || "Failed to send ADA");
       }
 
@@ -629,23 +712,72 @@ export default function Home() {
       );
       console.log(`[sendAda] Response data:`, data);
 
-      // Refresh UTXOs after a delay (balance is calculated from UTXOs)
-      const scheduleStart = performance.now();
-      setTimeout(() => {
-        console.log(`[sendAda] Refreshing UTXOs (scheduled 3s after send)...`);
-        const refreshStart = performance.now();
-        refreshWalletUtxos();
-        console.log(
-          `[sendAda] UTXO refresh initiated: ${(
-            performance.now() - refreshStart
-          ).toFixed(2)}ms`
+      // Store initial balances to detect when transaction appears
+      // Track all recipients for loading indicators
+      const toAddresses = recipients.map((r) => r.address);
+      const initialFromBalance = fromWallet?.balance?.ada
+        ? parseFloat(fromWallet.balance.ada)
+        : 0;
+
+      // Get initial balances for all recipients
+      const initialToBalances: Record<string, number> = {};
+      recipients.forEach((recipient) => {
+        const toWallet = wallets.find(
+          (w) => w.cardanoAddress === recipient.address
         );
+        initialToBalances[recipient.address] = toWallet?.balance?.ada
+          ? parseFloat(toWallet.balance.ada)
+          : 0;
+      });
+
+      const expectedAmount = parseFloat(totalAmount);
+
+      // Set pending transaction state with all recipient addresses
+      setPendingTransaction({
+        fromWalletId,
+        toAddresses, // All recipient addresses
+        amount: totalAmount, // Store total as string for compatibility
+        initialFromBalance,
+        initialToBalances, // Balances for all recipients
+        expectedAmount,
+        startTime: Date.now(),
+      });
+
+      // Clear any existing polling interval
+      if (pendingTransactionRef.current) {
+        clearInterval(pendingTransactionRef.current);
+      }
+
+      // Poll for transaction confirmation
+      let pollCount = 0;
+      const maxPolls = 30; // 30 polls * 2 seconds = 60 seconds max
+      pendingTransactionRef.current = setInterval(() => {
+        pollCount++;
+        console.log(
+          `[sendAda] Polling for transaction confirmation (attempt ${pollCount}/${maxPolls})...`
+        );
+
+        // Refresh UTXOs to check for balance change
+        refreshWalletUtxos();
+
+        if (pollCount >= maxPolls) {
+          // Safety timeout - clear after 60 seconds even if not confirmed
+          console.log(
+            `[sendAda] Max polls reached, clearing pending transaction (transaction may still be processing)`
+          );
+          if (pendingTransactionRef.current) {
+            clearInterval(pendingTransactionRef.current);
+            pendingTransactionRef.current = null;
+          }
+          setPendingTransaction(null);
+        }
+      }, 2000); // Poll every 2 seconds
+
+      // Initial refresh after 3 seconds
+      setTimeout(() => {
+        console.log(`[sendAda] Initial UTXO refresh (3s after send)...`);
+        refreshWalletUtxos();
       }, 3000);
-      console.log(
-        `[sendAda] UTXO refresh scheduled: ${(
-          performance.now() - scheduleStart
-        ).toFixed(2)}ms`
-      );
     },
     [wallets, refreshWalletUtxos]
   );
@@ -844,7 +976,9 @@ export default function Home() {
       );
 
       // Create optimistic transaction entry immediately for instant UI feedback
-      const optimisticEntryId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      const optimisticEntryId = `${Date.now()}-${Math.random()
+        .toString(36)
+        .substr(2, 9)}`;
       const optimisticEntry: TransactionLogEntry = {
         id: optimisticEntryId,
         timestamp: Date.now(),
@@ -942,7 +1076,9 @@ export default function Home() {
                       ...tx,
                       amount:
                         result.amount ||
-                        `${((utxo.value?.lovelace || 0) / 1000000).toFixed(2)} ADA`,
+                        `${((utxo.value?.lovelace || 0) / 1000000).toFixed(
+                          2
+                        )} ADA`,
                       change: result.change || null,
                       sendHalf: result.sendHalf || false,
                       status: "submitted" as const,
@@ -961,7 +1097,9 @@ export default function Home() {
           // Unified endpoint polls every 10s, so cached status is usually fresh
           const cachedHeadStatus = hydraStatus[submitParty];
           // Allow transactions when Open or SnapshotConfirmed (SnapshotConfirmed is an intermediate state, transactions work fine)
-          const isOpenState = cachedHeadStatus?.tag === "Open" || cachedHeadStatus?.tag === "SnapshotConfirmed";
+          const isOpenState =
+            cachedHeadStatus?.tag === "Open" ||
+            cachedHeadStatus?.tag === "SnapshotConfirmed";
           if (!cachedHeadStatus || !isOpenState) {
             const statusTag = cachedHeadStatus?.tag || "not available";
             const errorMsg = `Cannot submit transaction: Head is ${statusTag}. Head must be Open to submit transactions.`;
@@ -1006,7 +1144,7 @@ export default function Home() {
           // Set flag to skip the next hydraStatus-triggered history refresh
           // This prevents double refresh when unified status updates hydraStatus
           skipNextHistoryRefreshRef.current = true;
-          
+
           // Debounce history refresh to avoid glitchy double-updates
           // Wait 1.5 seconds to let the unified status endpoint update first
           // This prevents the history refresh from conflicting with the optimistic update
@@ -1097,7 +1235,9 @@ export default function Home() {
         // Use startTransition for smooth, non-blocking update
         startTransition(() => {
           setTransactions((prev) => {
-            const existingEntry = prev.find((tx) => tx.id === optimisticEntryId);
+            const existingEntry = prev.find(
+              (tx) => tx.id === optimisticEntryId
+            );
             if (existingEntry) {
               return prev.map((tx) =>
                 tx.id === optimisticEntryId
@@ -1116,7 +1256,9 @@ export default function Home() {
               fromParty,
               toParty,
               utxoRef,
-              amount: `${((utxo.value?.lovelace || 0) / 1000000).toFixed(2)} ADA`,
+              amount: `${((utxo.value?.lovelace || 0) / 1000000).toFixed(
+                2
+              )} ADA`,
               sendHalf: false,
               status: "error",
               error: errorMessage,
@@ -1150,11 +1292,11 @@ export default function Home() {
               className="w-16 h-16"
             />
             <p className="text-6xl uppercase tracking-wider text-sky-400 font-bold">
-            Hydra Factory
-          </p>
+              Hydra Factory
+            </p>
           </div>
           <h1 className="text-xl font-semibold">
-            Spin up your node, wallets, and a Hydra heads in one place.
+            Spin up your node, wallets, and a Hydra head in one place.
           </h1>
         </header>
 
@@ -1189,6 +1331,7 @@ export default function Home() {
           onCreateWallet={createWallet}
           onSendAda={sendAda}
           isInitialLoading={isInitialLoading}
+          pendingTransaction={pendingTransaction}
           onRefreshBalances={() => {
             // Refresh UTXOs for all wallets - balance is calculated from UTXOs
             // This eliminates the need for a separate balance endpoint call
@@ -1254,19 +1397,22 @@ export default function Home() {
               .filter(Boolean);
 
             // Call init on all selected wallets with other parties info
-            const promises = selectedWalletIds.map(async (walletId) => {
+            // Use the same port calculation as node startup (4001 + index)
+            const promises = selectedWalletIds.map(async (walletId, index) => {
               const wallet = wallets.find((w) => w.id === walletId);
               if (!wallet) return;
               const walletLabel = wallet.label || walletId;
               const otherParties = allWalletLabels.filter(
                 (l) => l !== walletLabel
               );
+              // Calculate port based on selection order (same as node startup)
+              const apiPort = 4001 + index;
 
               try {
                 const response = await fetch(
                   `/api/hydra/${walletLabel}/action?action=init&otherParties=${otherParties.join(
                     ","
-                  )}`,
+                  )}&port=${apiPort}`,
                   { method: "POST" }
                 );
                 if (!response.ok) {
